@@ -1,4 +1,4 @@
-# CLAUDE.md — Leti Gang, More than a Hack 2027
+# CLAUDE.md â€” Leti Gang, More than a Hack 2027
 
 Working notes for this repository and the raw material for the technical document (due with the
 submission, **17 Nov 2026**; deliverables `<team_name>.csv` + `<team_name>.pdf|md`, public repo).
@@ -8,11 +8,11 @@ Team: **Leti Gang** (3 members). Branch: `leti-gang` on `saadnadeem554/more-than
 
 - No `Co-Authored-By: Claude` (or any Claude attribution) in commits. Descriptive messages.
 - Never commit match data: `data/`, `external/`, `kaggle/ds/*.npz`, `kaggle/out/` are gitignored.
-- Do not send competition data, video or extracts to hosted LLMs (FAQ/T&C) — inspect only
+- Do not send competition data, video or extracts to hosted LLMs (FAQ/T&C) â€” inspect only
   aggregate statistics. Kaggle receives **external-match features only**, never competition data.
 - No hand labels on BAR-ATH, not even for validation (organiser, issue #8). No training on the
   provided match with its own tracking as labels (issue #2). Weights trained on other data are fine.
-- The public 5 minutes (17 possessions) is a sanity check, never a selection criterion —
+- The public 5 minutes (17 possessions) is a sanity check, never a selection criterion â€”
   model/parameter choices are made by held-out **external** matches.
 - The submission must regenerate byte-identically: check sha256 of two runs of `make_submission.py`.
 
@@ -54,7 +54,7 @@ so fragmentation is the main enemy.
 **Why learned, on external data.** No labels of this match may be used. The DFL/Sportec open
 dataset (7 Bundesliga / 2. Bundesliga matches 2022/23, CC BY 4.0, Bassek, Rein, Weber & Memmert
 2025, *Scientific Data*, doi 10.6084/m9.figshare.28196177) has per-frame `BallStatus` (alive/dead)
-and `BallPossession` (home/away) — the same definition as the competition ground truth. 25 Hz,
+and `BallPossession` (home/away) â€” the same definition as the competition ground truth. 25 Hz,
 same as ours. Labels: dead share ~45% of match time (vs public window 20%).
 
 **Degradation (domain adaptation by simulation).** Clean DFL tracking is degraded to resemble the
@@ -75,8 +75,9 @@ collective/per-team x velocity, team centroid, defensive-line depth. Team-swap a
 exchanges team blocks and negates signed `*_s` columns, so "home" carries no prior.
 
 **Model + decoding.** 2-layer BiGRU (hidden 64) on 400-step chunks, 4000 iters, AdamW + OneCycle;
-3 seeds trained on all 7 matches; log-probs averaged; Viterbi with switching cost 1.0 nats
-(chosen by held-out CV). Frames 110,808–113,741 forced `D` (FAQ: graded, before 2nd-half kickoff).
+trained on DFL labels with short sandwiched touches (<3 s) merged (`src/labels.py`, see error
+analysis); 5 seeds trained on all 7 matches; log-probs averaged; Viterbi with switching cost
+2.0 nats (chosen by held-out CV on the merged labels). Frames 110,808â€“113,741 forced `D` (FAQ: graded, before 2nd-half kickoff).
 Ungraded frames `X`.
 
 **Possession rules implemented.** Inherited from the training labels (provider's corrected
@@ -87,27 +88,49 @@ balls. Minimum structure comes from the Viterbi switching cost, not hand rules.
 
 | step | external spellF1 | public 5-min (sanity) | full-match output |
 |---|---|---|---|
-| starter `baseline_smooth50` | 0.195 (published full-match 0.2433) | 0.326 | — |
+| starter `baseline_smooth50` | 0.195 (published full-match 0.2433) | 0.326 | â€” |
 | v1 rule decoder (`src/decoder.py`) | 0.171 | 0.469 | 218 poss |
 | GRU v1, random gaps | 0.53/0.58/0.61 (3 folds) | 0.542 | 271 poss |
-| + calibrated degradation, 4-config sweep (all within 0.015) | 0.644 ± 0.029 (7 folds) | 0.606 | 332 poss |
-| + context gaps, no direction features | 0.629 (7 folds, harder benchmark) | — | — |
+| + calibrated degradation, 4-config sweep (all within 0.015) | 0.644 Â± 0.029 (7 folds) | 0.606 | 332 poss |
+| + context gaps, no direction features | 0.629 (7 folds, harder benchmark) | â€” | â€” |
 | + direction features | 0.653 (7 folds; better on 6/7, paired) | 0.635, 17 poss (truth 17) | 299 poss, 11.8 s, 42% D |
-| + Metrica sample games 1-2 (dropped) | 0.649 vs 0.653 paired | � | � |
-| frame-level GT from here (honest boundaries): same model | 0.635 | � | � |
-| frame-interpolated decoding / 8000 iters | 0.639 / 0.630 (noise / worse) � not adopted | � | � |
-| **5-seed ensemble, cost 1.0 (current)** | **0.635** (7 folds, frame-level GT) | 0.573, 13 poss (truth 17) | 302 poss, 11.8 s, 44% D of graded |
+| + Metrica sample games 1-2 (dropped) | 0.649 vs 0.653 paired | — | — |
+| frame-level GT from here (honest boundaries): same model | 0.635 | — | — |
+| frame-interpolated decoding / 8000 iters | 0.639 / 0.630 (noise / worse) — not adopted | — | — |
+| 5-seed ensemble, cost 1.0 | 0.635 (7 folds, frame-level GT) | 0.573, 13 poss (truth 17) | 302 poss, 11.8 s, 44% D of graded |
+| same raw-label model, scored on controlled-possession labels (merge <3 s) | 0.656 @cost 1 / 0.689 @cost 8 | — | — |
+| **train on merged labels (<3 s), 5 seeds, cost 2.0 (current)** | **0.691** on controlled labels (better than raw at equal cost on 5/7 folds; flat 0.687–0.691 across costs) | 0.600, 13 poss | 239 poss, 14.9 s, 4.0 / alive-min (public GT 4.2, not fitted) |
 
 Evaluation note: until the v4 dataset, held-out ground truth was step-majority labels repeated to
 frames, so boundary precision inside a 10-frame step was not measured. From v4 on, held-out scores
 use frame-level labels (`YF` in the npz); `*_fr` columns = step log-probs interpolated to frames and
 decoded per frame (switching cost x 10).
 
+## Error analysis (held-out external folds, `analysis/oracle_errors.py`)
+
+| scenario | spellF1 |
+|---|---|
+| model as shipped | 0.634 |
+| oracle dead/alive (true D, model's team) | 0.632 — dead-ball detection is **not** the bottleneck |
+| oracle team while alive | 0.946 — nearly all loss is possession changes in live play |
+
+True possessions by length, matched at IoU 0.5: <2 s 22% (919 of 3061!), 2–5 s 54%, 5–10 s 73%,
+10–20 s 88%, ≥20 s 96%. The model predicted 2249 possessions vs 3061 true.
+
+**Label-definition mismatch** (`analysis/possession_density.py`): DFL `BallPossession` switches on
+every touch — 8.3 possessions per minute of live play, 30% shorter than 2 s, median 3.7 s. The
+public competition GT (the organisers' reference for how cases are labelled): 4.2 / alive-min, 12%
+under 2 s, median 7.6 s. The competition counts only *controlled* possession (touches, deflections,
+uncontrolled aerial duels do not change it). `src/labels.merge_sandwiched` relabels a short spell
+of one team that sits between spells of the other team: merging <3 s gives 5.3 / min, 15% <2 s,
+median 6.8 s. 3 s chosen from the definition's wording ("keeps the ball for a few seconds"), not
+fitted; the agreement with the public statistics is corroboration (17 possessions is too few to fit).
+
 ## Tried and dropped / lessons
 
 - Hand-built decoder looked best on the public window (0.47) but was *below* the starter baseline
-  on labelled external matches — the public window cannot rank (as EVALUATION.md warns).
-- ATD ball speed field is unusable (9% filled, uncorrelated with displacement) — speed is computed
+  on labelled external matches â€” the public window cannot rank (as EVALUATION.md warns).
+- ATD ball speed field is unusable (9% filled, uncorrelated with displacement) â€” speed is computed
   from positions instead.
 - Bigger/longer/deeper GRUs (hidden 128, chunk 1000, 3 layers): no gain beyond noise.
 - Smart Tagging: not used by the model (external matches have none, so its weight cannot be tuned
@@ -127,4 +150,4 @@ decoded per frame (switching cost x 10).
 - Transfer gap: degradation is simulated; identity switches, false ball detections and camera
   artefacts of the real tracker are only partly modelled.
 - Possession definition of DFL labels vs organiser ground truth may differ on contested balls.
-- Only 7 external matches; held-out spellF1 varies 0.58–0.71 by match.
+- Only 7 external matches; held-out spellF1 varies 0.58â€“0.71 by match.

@@ -14,12 +14,15 @@ os.chdir(work)
 os.makedirs("models", exist_ok=True)
 
 BASE = ["--hidden", "64", "--layers", "2", "--chunk", "400", "--iters", "4000"]
-DATA = ["--features", "features_v4.npz", "--exclude", "7", "8"]  # 7, 8 = Metrica (dropped)
+EXC = ["--exclude", "7", "8"]  # 7, 8 = Metrica sample games (dropped)
+# Both arms are scored on DFL labels with short sandwiched touches (<3 s) merged, i.e. the
+# competition's "controlled possession" reading; they differ only in the training labels.
 RUNS = {
-    "dfl": DATA + BASE,
-    "dfl8k": DATA + BASE[:-1] + ["8000"],
+    "raw": ["--features", "features_v5_raw_eval3.npz"] + EXC + BASE,
+    "m3": ["--features", "features_v5_m3.npz"] + EXC + BASE,
 }
-FINAL = {"dfl": (0, 1, 2, 3, 4)}
+FINAL = {"m3": (0, 1, 2, 3, 4)}
+DUMP = False
 
 with open("results.txt", "w") as log:
     def run(name, extra):
@@ -34,7 +37,8 @@ with open("results.txt", "w") as log:
 
     for name, cfg in RUNS.items():
         for fold in range(7):
-            run(name, cfg + ["--val", str(fold), "--out", "models/{}_val{}.pt".format(name, fold)])
+            run(name, cfg + ["--val", str(fold), "--out", "models/{}_val{}.pt".format(name, fold)]
+                + (["--dump", "dump_{}_val{}.npz".format(name, fold)] if DUMP else []))
         for seed in FINAL.get(name, ()):
             run(name, cfg + ["--val", "-1", "--seed", str(seed),
                              "--out", "models/{}_all_s{}.pt".format(name, seed)])

@@ -140,6 +140,7 @@ def main():
     ap.add_argument("--features", default=os.path.join(ROOT, "external", "train", "features.npz"))
     ap.add_argument("--val", type=int, nargs="+", default=[0, 1], help="match indices held out; -1 = none")
     ap.add_argument("--exclude", type=int, nargs="*", default=[], help="match indices never used")
+    ap.add_argument("--dump", default=None, help="write held-out step log-probs + frame labels (npz)")
     ap.add_argument("--out", default=os.path.join(ROOT, "models", "seq.pt"))
     ap.add_argument("--iters", type=int, default=3000)
     ap.add_argument("--batch", type=int, default=32)
@@ -200,6 +201,18 @@ def main():
                 msg += "  val " + " ".join("{} {:.4f}".format(k, v) for k, v in
                                           evaluate(model, series, val_idx, mu, sd, args.device).items())
             print(msg, flush=True)
+
+    if val_idx and args.dump:  # held-out predictions for offline error analysis
+        model.eval()
+        dump = {}
+        with torch.no_grad():
+            for i in val_idx:
+                x, y, yf = series[i]
+                xt = torch.from_numpy(((x - mu) / sd)[None]).float().to(args.device)
+                dump["logp_%d" % i] = torch.log_softmax(model(xt)[0], -1).cpu().numpy()
+                dump["yf_%d" % i] = yf if yf is not None else np.repeat(y, 10)
+                dump["x_%d" % i] = x
+        np.savez_compressed(args.dump, columns=np.array(columns), **dump)
 
     if val_idx:  # choose the decoding switch cost by held-out matches
         for cost in (0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0):

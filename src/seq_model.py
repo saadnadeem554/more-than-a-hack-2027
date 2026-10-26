@@ -18,7 +18,7 @@ from src.features import compute_features, STEP  # noqa: E402
 from src import decoder as rule  # noqa: E402
 
 SEQ = dict(
-    switch_cost=1.0,     # nats per label change in the final Viterbi (chosen by 7-fold external CV)
+    switch_cost=2.0,     # nats per label change in the final Viterbi (chosen by 7-fold external CV)
     tag_team=0.0,        # weight of Smart Tagging team votes (nats)
     tag_setpiece=0.0,    # nats of extra D inside the first seconds of a set-piece window
     frame_decode=False,  # interpolate step log-probs to frames and decode per frame (cost x STEP)
