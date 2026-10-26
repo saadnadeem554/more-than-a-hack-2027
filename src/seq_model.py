@@ -14,11 +14,11 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import half_video_blocks  # noqa: E402
-from src.features import compute_features, STEP  # noqa: E402
+from src.features import compute_features, columns, STEP  # noqa: E402
 from src import decoder as rule  # noqa: E402
 
 SEQ = dict(
-    switch_cost=2.0,     # nats per label change in the final Viterbi (chosen by 7-fold external CV)
+    switch_cost=2.0,     # nats per label change; held-out CV flat over 2-4, 2 matches the public density best
     tag_team=0.0,        # weight of Smart Tagging team votes (nats)
     tag_setpiece=0.0,    # nats of extra D inside the first seconds of a set-piece window
     frame_decode=False,  # interpolate step log-probs to frames and decode per frame (cost x STEP)
@@ -56,10 +56,18 @@ def decode_seq(atd, model_paths, cfg=SEQ):
     net, setp = rule.tag_evidence(atd.n_frames, rule.PARAMS)
     for half, first, last in half_video_blocks("BAR-ATH"):
         sl = slice(first, last + 1)
-        feats = compute_features(atd.px[sl], atd.py[sl], atd.bx[sl], atd.by[sl], atd.team,
-                                 pitch=atd.pitch, orient="ball_x_s" in models[0][3],
-                                 touch="ball_acc" in models[0][3])
-        logp = predict_logp(models, feats)
+        # models may use different feature sets (e.g. with and without touch features):
+        # compute each set once and average log-probs over every model
+        logp, groups = 0.0, {}
+        for mdl in models:
+            groups.setdefault(tuple(mdl[3]), []).append(mdl)
+        for cols, group in groups.items():
+            feats = compute_features(atd.px[sl], atd.py[sl], atd.bx[sl], atd.by[sl], atd.team,
+                                     pitch=atd.pitch, orient="ball_x_s" in cols,
+                                     touch="ball_acc" in cols)
+            assert list(cols) == columns("ball_x_s" in cols, "ball_acc" in cols)
+            logp = logp + predict_logp(group, feats) * len(group)
+        logp = logp / len(models)
         n_steps = len(logp)
         pad = lambda a: np.pad(a, (0, n_steps * STEP - len(a)), mode="edge").reshape(n_steps, STEP).mean(1)
         logp = logp.copy()

@@ -65,6 +65,6 @@ env/
 external/
 kaggle/ds/features.npz
 models/*.pt
-!models/seq_all_s*.pt
+!models/seq_*.pt
 kaggle/out/
 kaggle/ds/*.npz

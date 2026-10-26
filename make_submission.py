@@ -2,7 +2,7 @@
 
     python make_submission.py [--out evaluation/results/leti_gang.csv] [--rule]
 
-Default: GRU ensemble trained on external matches (models/seq_all_s*.pt) + Viterbi.
+Default: GRU ensemble trained on external matches (models/seq_*_s*.pt) + Viterbi.
 --rule: the hand-built v1 decoder (no learned weights).
 """
 import argparse
@@ -28,7 +28,7 @@ def main():
         labels = decode(atd)
     else:
         from src.seq_model import decode_seq
-        paths = sorted(glob.glob(os.path.join(ROOT, "models", "seq_all_s*.pt")))
+        paths = sorted(glob.glob(os.path.join(ROOT, "models", "seq_*_s*.pt")))
         labels = decode_seq(atd, paths)
     write_submission(args.out, labels)
     print("wrote", args.out, {k: int((labels == k).sum()) for k in "HADX"})

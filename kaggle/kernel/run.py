@@ -18,15 +18,10 @@ V6 = ["--features", "features_v6_lab.npz"]   # Y/YF = 3 s merge; Y_m2/YF_m2, Y_m
 V6T = ["--features", "features_v6t_lab.npz"]  # same degradation + touch features
 RUNS = {
     "base": V6 + BASE,
-    "tw3": V6 + BASE + ["--trans-weight", "3"],
     "touch": V6T + BASE,
-    "train2": V6 + BASE + ["--ykey", "Y_m2"],
-    "train4": V6 + BASE + ["--ykey", "Y_m4"],
-    "eval2": V6 + BASE + ["--yfkey", "YF_m2"],
-    "eval4": V6 + BASE + ["--yfkey", "YF_m4"],
 }
-FINAL = {}
-DUMP = False
+FINAL = {"base": (0, 1, 2, 3, 4), "touch": (0, 1, 2, 3, 4)}
+DUMP = True
 
 with open("results.txt", "w") as log:
     def run(name, extra):
@@ -48,3 +43,6 @@ with open("results.txt", "w") as log:
                              "--out", "models/{}_all_s{}.pt".format(name, seed)])
 for f in glob.glob("models/*_val*.pt"):
     os.remove(f)
+for f in glob.glob("*.npz"):  # keep the output small: inputs are not outputs
+    if not f.startswith("dump_"):
+        os.remove(f)

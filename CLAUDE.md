@@ -76,8 +76,11 @@ exchanges team blocks and negates signed `*_s` columns, so "home" carries no pri
 
 **Model + decoding.** 2-layer BiGRU (hidden 64) on 400-step chunks, 4000 iters, AdamW + OneCycle;
 trained on DFL labels with short sandwiched touches (<3 s) merged (`src/labels.py`, see error
-analysis); 5 seeds trained on all 7 matches; log-probs averaged; Viterbi with switching cost
-2.0 nats (chosen by held-out CV on the merged labels). Frames 110,808–113,741 forced `D` (FAQ: graded, before 2nd-half kickoff).
+analysis). Ensemble of 10 models trained on all 7 matches: 5 seeds on the base features + 5 seeds
+with touch features (ball velocity change, control at touches, ball x-velocity along the attack,
+per-team approach speed); log-probs averaged; Viterbi with switching cost 2.0 nats (held-out CV
+flat over 2–4; 2 gives the possession density closest to the public reference, 4.0 vs 4.2 per
+live minute). Frames 110,808–113,741 forced `D` (FAQ: graded, before 2nd-half kickoff).
 Ungraded frames `X`.
 
 **Possession rules implemented.** Inherited from the training labels (provider's corrected
@@ -99,55 +102,10 @@ balls. Minimum structure comes from the Viterbi switching cost, not hand rules.
 | frame-interpolated decoding / 8000 iters | 0.639 / 0.630 (noise / worse) — not adopted | — | — |
 | 5-seed ensemble, cost 1.0 | 0.635 (7 folds, frame-level GT) | 0.573, 13 poss (truth 17) | 302 poss, 11.8 s, 44% D of graded |
 | same raw-label model, scored on controlled-possession labels (merge <3 s) | 0.656 @cost 1 / 0.689 @cost 8 | — | — |
-| **train on merged labels (<3 s), 5 seeds, cost 2.0 (current)** | **0.691** on controlled labels (better than raw at equal cost on 5/7 folds; flat 0.687–0.691 across costs) | 0.600, 13 poss | 239 poss, 14.9 s, 4.0 / alive-min (public GT 4.2, not fitted) |
-
-Evaluation note: until the v4 dataset, held-out ground truth was step-majority labels repeated to
-frames, so boundary precision inside a 10-frame step was not measured. From v4 on, held-out scores
-use frame-level labels (`YF` in the npz); `*_fr` columns = step log-probs interpolated to frames and
-decoded per frame (switching cost x 10).
-
-## Error analysis (held-out external folds, `analysis/oracle_errors.py`)
-
-| scenario | spellF1 |
-|---|---|
-| model as shipped | 0.634 |
-| oracle dead/alive (true D, model's team) | 0.632 — dead-ball detection is **not** the bottleneck |
-| oracle team while alive | 0.946 — nearly all loss is possession changes in live play |
-
-True possessions by length, matched at IoU 0.5: <2 s 22% (919 of 3061!), 2–5 s 54%, 5–10 s 73%,
-10–20 s 88%, ≥20 s 96%. The model predicted 2249 possessions vs 3061 true.
-
-**Label-definition mismatch** (`analysis/possession_density.py`): DFL `BallPossession` switches on
-every touch — 8.3 possessions per minute of live play, 30% shorter than 2 s, median 3.7 s. The
-public competition GT (the organisers' reference for how cases are labelled): 4.2 / alive-min, 12%
-under 2 s, median 7.6 s. The competition counts only *controlled* possession (touches, deflections,
-uncontrolled aerial duels do not change it). `src/labels.merge_sandwiched` relabels a short spell
-of one team that sits between spells of the other team: merging <3 s gives 5.3 / min, 15% <2 s,
-median 6.8 s. 3 s chosen from the definition's wording ("keeps the ball for a few seconds"), not
-fitted; the agreement with the public statistics is corroboration (17 possessions is too few to fit).
-
-## Tried and dropped / lessons
-
-- Hand-built decoder looked best on the public window (0.47) but was *below* the starter baseline
-  on labelled external matches — the public window cannot rank (as EVALUATION.md warns).
-- ATD ball speed field is unusable (9% filled, uncorrelated with displacement) — speed is computed
-  from positions instead.
-- Bigger/longer/deeper GRUs (hidden 128, chunk 1000, 3 layers): no gain beyond noise.
-- Smart Tagging: not used by the model (external matches have none, so its weight cannot be tuned
-  honestly). Set-piece windows are 35 s / 5 s fixed and only approximately locate restarts; throw-ins
-  have Team `N/A`.
-- Metrica open sample games 1-2 as extra training data (labels derived from events: dead from
-  BALL OUT / FAULT RECEIVED / goal to the next restart; possession = team of last PASS / SET PIECE /
-  SHOT / RECOVERY / BALL LOST, unchanged by CHALLENGE). Paired 7-fold test on held-out DFL:
-  0.649 with vs 0.653 without (mixed per match, -0.064..+0.023) -> dropped. Likely causes: event-
-  derived labels differ from tracking-derived ones, and the sample tracking blanks the ball almost
-  exactly when dead (visible on 0-17% of dead frames vs 66% in the public window), a shortcut that
-  does not hold for the competition tracker. Code kept: `src/external_metrica.py`, `--metrica`.
-- Broadcast video/tracking: not used (unsynchronised; tactical tracking is complete).
-
-## Limitations / future work
-
-- Transfer gap: degradation is simulated; identity switches, false ball detections and camera
-  artefacts of the real tracker are only partly modelled.
-- Possession definition of DFL labels vs organiser ground truth may differ on contested balls.
-- Only 7 external matches; held-out spellF1 varies 0.58–0.71 by match.
+| train on merged labels (<3 s), 5 seeds, cost 2.0 | **0.691** on controlled labels (better than raw at equal cost on 5/7 folds; flat 0.687–0.691 across costs) | 0.600, 13 poss | 239 poss, 14.9 s, 4.0 / alive-min (public GT 4.2, not fitted) |
+| v6 degradation: ball smoothed 15–31 frames (calibrated on velocity-change quantiles) — base | 0.697 (new benchmark) | 0.566 [0.36, 0.77], 12 poss | 3.87 / live-min |
+| + transition-weighted loss ×3 | −0.008 paired (2/7) — dropped | — | — |
+| + touch features | +0.012 paired (4/7, not significant) | 0.430, 10 poss | 3.79 / live-min |
+| train on 2 s / 4 s merge (scored on 3 s) | +0.002 / −0.024 paired | — | — |
+| 3 s model scored on 2 s / 4 s labels (robustness) | 0.660 / 0.708 | — | — |
+| **ensemble base + touch (10 models), cost 2.0 (current)** | **0.709** (better than base on 6/7; flat 0.709–0.712 over costs 2–4) | 0.566 [0.36, 0.77], 12 poss | 243 poss, 15.2 s, 3.96 / live-min, 42% D |
