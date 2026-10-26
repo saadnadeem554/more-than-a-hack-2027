@@ -14,14 +14,18 @@ os.chdir(work)
 os.makedirs("models", exist_ok=True)
 
 BASE = ["--hidden", "64", "--layers", "2", "--chunk", "400", "--iters", "4000"]
-EXC = ["--exclude", "7", "8"]  # 7, 8 = Metrica sample games (dropped)
-# Both arms are scored on DFL labels with short sandwiched touches (<3 s) merged, i.e. the
-# competition's "controlled possession" reading; they differ only in the training labels.
+V6 = ["--features", "features_v6_lab.npz"]   # Y/YF = 3 s merge; Y_m2/YF_m2, Y_m4/YF_m4 extra
+V6T = ["--features", "features_v6t_lab.npz"]  # same degradation + touch features
 RUNS = {
-    "raw": ["--features", "features_v5_raw_eval3.npz"] + EXC + BASE,
-    "m3": ["--features", "features_v5_m3.npz"] + EXC + BASE,
+    "base": V6 + BASE,
+    "tw3": V6 + BASE + ["--trans-weight", "3"],
+    "touch": V6T + BASE,
+    "train2": V6 + BASE + ["--ykey", "Y_m2"],
+    "train4": V6 + BASE + ["--ykey", "Y_m4"],
+    "eval2": V6 + BASE + ["--yfkey", "YF_m2"],
+    "eval4": V6 + BASE + ["--yfkey", "YF_m4"],
 }
-FINAL = {"m3": (0, 1, 2, 3, 4)}
+FINAL = {}
 DUMP = False
 
 with open("results.txt", "w") as log:

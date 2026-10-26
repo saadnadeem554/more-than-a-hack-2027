@@ -57,7 +57,8 @@ def decode_seq(atd, model_paths, cfg=SEQ):
     for half, first, last in half_video_blocks("BAR-ATH"):
         sl = slice(first, last + 1)
         feats = compute_features(atd.px[sl], atd.py[sl], atd.bx[sl], atd.by[sl], atd.team,
-                                 pitch=atd.pitch, orient="ball_x_s" in models[0][3])
+                                 pitch=atd.pitch, orient="ball_x_s" in models[0][3],
+                                 touch="ball_acc" in models[0][3])
         logp = predict_logp(models, feats)
         n_steps = len(logp)
         pad = lambda a: np.pad(a, (0, n_steps * STEP - len(a)), mode="edge").reshape(n_steps, STEP).mean(1)

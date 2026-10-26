@@ -57,14 +57,17 @@ def swap_np(x, columns):
     return y
 
 
-def load(path):
-    """[(X, step_labels, frame_labels or None)], plus per-series match, half, rep and columns."""
+def load(path, ykey="Y", yfkey="YF"):
+    """[(X, step_labels, frame_labels or None)], plus per-series match, half, rep and columns.
+
+    ykey / yfkey pick which stored label set to train on / score against (relabel_dataset.py).
+    """
     z = np.load(path, allow_pickle=True)
-    X, Y, lens = z["X"], z["Y"], z["lens"]  # read each array once: npz access decompresses
+    X, Y, lens = z["X"], z[ykey], z["lens"]  # read each array once: npz access decompresses
     ends = np.cumsum(lens)
     starts = ends - lens
-    if "YF" in z.files:
-        YF, fl = z["YF"], z["flens"]
+    if yfkey in z.files:
+        YF, fl = z[yfkey], z["flens"]
         fe = np.cumsum(fl)
         frames = [YF[s:e] for s, e in zip(fe - fl, fe)]
     else:
@@ -96,6 +99,18 @@ def viterbi_logp(logp, cost):
     for t in range(n - 1, 0, -1):
         path[t - 1] = back[t, path[t]]
     return path
+
+
+def transition_weights(yb, radius, weight):
+    """(batch, steps) weights: `weight` within `radius` steps of an H<->A change, else 1."""
+    team = yb.clone()
+    team[(team != 0) & (team != 1)] = -1
+    change = (team[:, 1:] != team[:, :-1]) & (team[:, 1:] >= 0) & (team[:, :-1] >= 0)
+    mark = torch.zeros_like(yb, dtype=torch.float32)
+    mark[:, 1:] = change.float()
+    k = torch.ones(1, 1, 2 * radius + 1, device=yb.device)
+    near = torch.nn.functional.conv1d(mark[:, None], k, padding=radius)[:, 0] > 0
+    return torch.where(near, torch.full_like(mark, weight), torch.ones_like(mark))
 
 
 def evaluate(model, series, idx, mu, sd, device, step=10, switch_cost=2.0):
@@ -141,6 +156,11 @@ def main():
     ap.add_argument("--val", type=int, nargs="+", default=[0, 1], help="match indices held out; -1 = none")
     ap.add_argument("--exclude", type=int, nargs="*", default=[], help="match indices never used")
     ap.add_argument("--dump", default=None, help="write held-out step log-probs + frame labels (npz)")
+    ap.add_argument("--ykey", default="Y", help="training label set in the npz")
+    ap.add_argument("--yfkey", default="YF", help="frame label set held-out matches are scored on")
+    ap.add_argument("--trans-weight", type=float, default=1.0,
+                    help="loss weight for steps within --trans-radius of a possession change")
+    ap.add_argument("--trans-radius", type=int, default=5, help="steps (0.4 s each)")
     ap.add_argument("--out", default=os.path.join(ROOT, "models", "seq.pt"))
     ap.add_argument("--iters", type=int, default=3000)
     ap.add_argument("--batch", type=int, default=32)
@@ -154,7 +174,7 @@ def main():
 
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
-    series, match, half, rep, columns = load(args.features)
+    series, match, half, rep, columns = load(args.features, args.ykey, args.yfkey)
     val_matches = set(v for v in args.val if v >= 0)
     excluded = set(args.exclude)
     train_idx = [i for i in range(len(series)) if match[i] not in val_matches | excluded]
@@ -167,7 +187,7 @@ def main():
     model = SeqNet(len(columns), args.hidden, args.layers).to(args.device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.iters)
-    loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction="none")
 
     t0 = time.time()
     for it in range(1, args.iters + 1):
@@ -189,7 +209,12 @@ def main():
         xb = torch.from_numpy(np.stack(xb)).float().to(args.device)
         yb = torch.from_numpy(np.stack(yb)).to(args.device)
         xb = xb + 0.02 * torch.randn_like(xb)
-        loss = loss_fn(model(xb).reshape(-1, 3), yb.reshape(-1))
+        per = loss_fn(model(xb).reshape(-1, 3), yb.reshape(-1)).reshape(yb.shape)
+        valid = (yb >= 0).float()
+        w = valid
+        if args.trans_weight != 1.0:
+            w = valid * transition_weights(yb, args.trans_radius, args.trans_weight)
+        loss = (per * w).sum() / valid.sum().clamp(min=1)
         opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)

@@ -7,7 +7,9 @@ Calibrated against aggregate feature quantiles of the competition ATD (analysis/
 - the automatic tracker rarely reports a ball beyond the lines, so an out-of-pitch ball is hidden
   most of the time;
 - players drop out in short blocks, and the tracker adds spurious detections (staff, substitutes
-  warming up), mostly near the touchlines.
+  warming up), mostly near the touchlines;
+- its ball track is heavily smoothed (velocity changes ~2x softer than raw optical tracking), so
+  the external ball is passed through a 15-31 frame moving average.
 
 Each call draws its strengths at random (domain randomisation), so the real tracking sits inside
 the range the model sees in training rather than at one guessed setting.
@@ -63,12 +65,28 @@ def context_pattern(bx, by, px, py, rng, pitch, base_hazard):
     return out
 
 
+def smooth_ball(bx, by, window):
+    """Centred moving average of the ball track (NaN-aware). The competition tracker's ball is
+    much smoother than raw optical positions (analysis/ball_smoothing.py)."""
+    if window <= 1:
+        return bx.copy(), by.copy()
+    k = np.ones(int(window))
+    out = []
+    for a in (bx, by):
+        ok = np.isfinite(a)
+        num = np.convolve(np.where(ok, a, 0.0), k, mode="same")
+        den = np.convolve(ok.astype(float), k, mode="same")
+        out.append(np.where(ok, num / np.maximum(den, 1), np.nan).astype(np.float32))
+    return out[0], out[1]
+
+
 def degrade(px, py, bx, by, rng, pitch=(105.0, 68.0), randomise=True, context=True):
     n = len(bx)
     L, W = pitch
     u = (lambda lo, hi: rng.uniform(lo, hi)) if randomise else (lambda lo, hi: (lo + hi) / 2)
     player_drop = u(0.005, 0.05)
-    ball_noise_m = u(0.05, 0.4)
+    ball_noise_m = u(0.0, 0.15)
+    ball_window = int(u(15, 31))
     out_hide = u(0.6, 1.0)
     spurious_rate = u(0.0, 0.25)
 
@@ -82,7 +100,7 @@ def degrade(px, py, bx, by, rng, pitch=(105.0, 68.0), randomise=True, context=Tr
     outside = (bx < 0) | (bx > 1) | (by < 0) | (by > 1)
     hide_out = outside & (np.repeat(rng.random(-(-n // 25)), 25)[:n] < out_hide)
     mask &= ~hide_out
-    bx2, by2 = bx.copy(), by.copy()
+    bx2, by2 = smooth_ball(bx, by, ball_window)
     bx2[~mask] = np.nan
     by2[~mask] = np.nan
     bx2 = bx2 + rng.normal(0, ball_noise_m / L, n)

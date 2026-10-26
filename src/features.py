@@ -23,11 +23,15 @@ TEAM_COLS = ["near1", "near2", "near3", "n5", "n10", "tracked", "sx", "sy"]
 SHARED = ["vis", "conf", "ball_ax", "ball_ay", "edge", "ball_v", "ctrl_s", "pspeed"]
 TEAM_ORIENT = ["cx_s", "vx_s", "depth_s"]
 SHARED_ORIENT = ["ball_x_s", "vx_all_s"]
+# Touch features (need orient): a touch is a sudden change of ball velocity; who is near at that
+# moment, and which way the ball then moves, says who played it.
+TEAM_TOUCH = ["appr"]
+SHARED_TOUCH = ["ball_acc", "touch_ctrl_s", "ball_vx_s"]
 
 
-def columns(orient=True):
-    team = TEAM_COLS + (TEAM_ORIENT if orient else [])
-    shared = SHARED + (SHARED_ORIENT if orient else [])
+def columns(orient=True, touch=False):
+    team = TEAM_COLS + (TEAM_ORIENT if orient else []) + (TEAM_TOUCH if touch else [])
+    shared = SHARED + (SHARED_ORIENT if orient else []) + (SHARED_TOUCH if touch else [])
     return shared + ["h_" + c for c in team] + ["a_" + c for c in team]
 
 
@@ -81,7 +85,7 @@ def _step_mean(a, step):
     return np.nan_to_num(out)
 
 
-def compute_features(px, py, bx, by, team, pitch=PITCH, step=STEP, orient=True):
+def compute_features(px, py, bx, by, team, pitch=PITCH, step=STEP, orient=True, touch=False):
     """(n_steps, len(columns(orient))) float32. One call per half (direction is per half)."""
     L, W = pitch
     n = len(bx)
@@ -158,7 +162,28 @@ def compute_features(px, py, bx, by, team, pitch=PITCH, step=STEP, orient=True):
                 second = own[:, 1] if own.shape[1] > 1 else own[:, 0]
                 cols[tag + "depth_s"] = np.where(np.isfinite(second), second, 0.0) * (1 if t == 0 else -1)
 
-    mat = np.stack([cols[name] for name in columns(orient)], axis=1)
+    if touch:
+        # ball velocity over +/- 3 frames from REAL observations only, then its change over 6 frames
+        kb = 3
+        rx = np.where(vis, bx, np.nan)
+        ry = np.where(vis, by, np.nan)
+        vxb = np.full(n, np.nan)
+        vyb = np.full(n, np.nan)
+        vxb[kb:n - kb] = (rx[2 * kb:] - rx[:-2 * kb]) * L / (2 * kb / 25.0)
+        vyb[kb:n - kb] = (ry[2 * kb:] - ry[:-2 * kb]) * W / (2 * kb / 25.0)
+        acc = np.full(n, np.nan)
+        acc[kb:n - kb] = np.hypot(vxb[2 * kb:] - vxb[:-2 * kb], vyb[2 * kb:] - vyb[:-2 * kb])
+        acc = np.clip(np.nan_to_num(acc), 0, 40)
+        cols["ball_acc"] = acc
+        cols["touch_ctrl_s"] = c * np.minimum(acc / 10.0, 1.0)
+        cols["ball_vx_s"] = np.clip(np.nan_to_num(vxb), -40, 40) * sgn
+        for t, tag in ((0, "h_"), (1, "a_")):
+            near = cols[tag + "near1"]
+            appr = np.zeros(n)
+            appr[kp:n - kp] = (near[2 * kp:] - near[:-2 * kp]) / (2 * kp / 25.0)
+            cols[tag + "appr"] = np.clip(appr, -15, 15) * conf
+
+    mat = np.stack([cols[name] for name in columns(orient, touch)], axis=1)
     return _step_mean(mat, step).astype(np.float32)
 
 

@@ -23,6 +23,8 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--train-merge", type=float, default=0.0, help="seconds")
     ap.add_argument("--eval-merge", type=float, default=0.0, help="seconds")
+    ap.add_argument("--extra", type=float, nargs="*", default=[],
+                    help="also store Y_m<s> and YF_m<s> label sets for these merge seconds")
     args = ap.parse_args()
     z = np.load(args.inp, allow_pickle=True)
     data = {k: z[k] for k in z.files}
@@ -30,13 +32,22 @@ def main():
     fe = np.cumsum(fl)
     ys, yfs = [], []
     for s, e, n_steps in zip(fe - fl, fe, data["lens"]):
-        yf = data["YF"][s:e]
+        yf = (data["YF_raw"] if "YF_raw" in data else data["YF"])[s:e]
         y = step_labels(merge_sandwiched(yf, int(args.train_merge * 25)))
         assert len(y) == n_steps
         ys.append(y)
         yfs.append(merge_sandwiched(yf, int(args.eval_merge * 25)).astype(np.int8))
     data["Y"] = np.concatenate(ys)
     data["YF"] = np.concatenate(yfs)
+    raw = [data["YF_raw"][s:e] if "YF_raw" in data else None for s, e in zip(fe - fl, fe)]
+    if raw[0] is None:  # keep the provider labels so later relabelling starts from them
+        data["YF_raw"] = z["YF"]
+        raw = [z["YF"][s:e] for s, e in zip(fe - fl, fe)]
+    for sec in args.extra:
+        tag = "m%g" % sec
+        merged = [merge_sandwiched(yf, int(sec * 25)) for yf in raw]
+        data["Y_" + tag] = np.concatenate([step_labels(m) for m in merged])
+        data["YF_" + tag] = np.concatenate([m.astype(np.int8) for m in merged])
     np.savez_compressed(args.out, **data)
     print("saved", args.out)
 
