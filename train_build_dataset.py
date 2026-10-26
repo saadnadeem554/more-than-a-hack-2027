@@ -13,7 +13,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 from src import external_sportec as ext  # noqa: E402
-from src.degrade import degrade  # noqa: E402
+from src.degrade import degrade, degraded_team  # noqa: E402
 from src.features import compute_features, step_labels, N_FEATURES, COLUMNS  # noqa: E402
 
 
@@ -32,7 +32,7 @@ def main():
             y = step_labels(part["label"])
             for rep in range(args.reps):
                 px, py, bx, by = degrade(part["px"], part["py"], part["bx"], part["by"], rng, pitch=pitch)
-                X.append(compute_features(px, py, bx, by, part["team"], pitch=pitch))
+                X.append(compute_features(px, py, bx, by, degraded_team(part["team"]), pitch=pitch))
                 Y.append(y); M.append(mi); H.append(int(part["half"][0])); R.append(rep)
             print(mid, "half", part["half"][0], "done", flush=True)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

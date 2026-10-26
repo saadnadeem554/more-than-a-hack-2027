@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 import possession_metrics as pm
 from src import external_sportec as ext
-from src.degrade import degrade
+from src.degrade import degrade, degraded_team
 from src.decoder import PARAMS, build_emissions, decode_block
 
 
@@ -20,7 +20,7 @@ def score_match(mid, p, seed=0):
     spells, macros = [], []
     for part in parts:
         px, py, bx, by = degrade(part["px"], part["py"], part["bx"], part["by"], rng, pitch=pitch)
-        ns = SimpleNamespace(px=px, py=py, bx=bx, by=by, team=part["team"], pitch=pitch, n_frames=len(bx))
+        ns = SimpleNamespace(px=px, py=py, bx=bx, by=by, team=degraded_team(part["team"]), pitch=pitch, n_frames=len(bx))
         pred = decode_block(build_emissions(ns, p, use_tags=False), p).astype(np.int8)
         gt = np.where(part["label"] >= 0, part["label"], 3).astype(np.int8)
         runs = pm.valid_runs(gt)

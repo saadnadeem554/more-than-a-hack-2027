@@ -18,7 +18,7 @@ from src.features import compute_features, STEP  # noqa: E402
 from src import decoder as rule  # noqa: E402
 
 SEQ = dict(
-    switch_cost=2.0,     # nats per label change in the final Viterbi
+    switch_cost=1.0,     # nats per label change in the final Viterbi (chosen by 7-fold external CV)
     tag_team=0.0,        # weight of Smart Tagging team votes (nats)
     tag_setpiece=0.0,    # nats of extra D inside the first seconds of a set-piece window
 )
@@ -31,7 +31,7 @@ def _load(paths):
     models = []
     for p in paths:
         ck = torch.load(p, map_location="cpu", weights_only=False)
-        m = SeqNet(len(ck["columns"]), ck["hidden"])
+        m = SeqNet(len(ck["columns"]), ck["hidden"], ck.get("layers", 2))
         m.load_state_dict(ck["state"])
         m.eval()
         models.append((m, ck["mu"], ck["sd"]))

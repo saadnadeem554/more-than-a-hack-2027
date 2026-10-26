@@ -7,7 +7,7 @@ sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "evaluation")); 
 import possession_metrics as pm
 from baseline import smooth
 from src import external_sportec as ext
-from src.degrade import degrade
+from src.degrade import degrade, degraded_team
 
 for window in (25, 50, 125):
     res = []
@@ -21,7 +21,7 @@ for window in (25, 50, 125):
             d = np.hypot((px - bx[:, None]) * L, (py - by[:, None]) * W)
             d = np.where(np.isfinite(d), d, np.inf)
             near = d.argmin(1)
-            codes = part["team"][near].astype(np.int8)
+            codes = degraded_team(part["team"])[near].astype(np.int8)
             codes[~np.isfinite(bx) | ~np.isfinite(d.min(1))] = -1
             lab = smooth(codes, window)
             pred = np.array([{"H": 0, "A": 1, "D": 2}[c] for c in lab], dtype=np.int8)

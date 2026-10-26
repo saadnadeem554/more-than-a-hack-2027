@@ -119,6 +119,7 @@ def main():
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--chunk", type=int, default=400, help="steps per training chunk (0.4 s each)")
     ap.add_argument("--hidden", type=int, default=64)
+    ap.add_argument("--layers", type=int, default=2)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--seed", type=int, default=0)
@@ -135,7 +136,7 @@ def main():
 
     allx = np.concatenate([series[i][0] for i in train_idx])
     mu, sd = allx.mean(0), allx.std(0) + 1e-6
-    model = SeqNet(len(columns), args.hidden).to(args.device)
+    model = SeqNet(len(columns), args.hidden, args.layers).to(args.device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.iters)
     loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
@@ -173,9 +174,16 @@ def main():
                                           evaluate(model, series, val_idx, mu, sd, args.device).items())
             print(msg, flush=True)
 
+    if val_idx:  # choose the decoding switch cost by held-out matches
+        for cost in (0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0):
+            r = evaluate(model, series, val_idx, mu, sd, args.device, switch_cost=cost)
+            print("RESULT val={} cost={} {}".format(",".join(map(str, sorted(val_matches))), cost,
+                  " ".join("{}={:.4f}".format(k, v) for k, v in r.items())), flush=True)
+
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     torch.save({"state": model.state_dict(), "mu": mu, "sd": sd, "columns": columns,
-                "hidden": args.hidden, "val": sorted(val_matches)}, args.out)
+                "hidden": args.hidden, "layers": args.layers,
+                "val": sorted(val_matches)}, args.out)
     print("saved", args.out)
 
 
