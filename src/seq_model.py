@@ -21,6 +21,7 @@ SEQ = dict(
     switch_cost=1.0,     # nats per label change in the final Viterbi (chosen by 7-fold external CV)
     tag_team=0.0,        # weight of Smart Tagging team votes (nats)
     tag_setpiece=0.0,    # nats of extra D inside the first seconds of a set-piece window
+    frame_decode=False,  # interpolate step log-probs to frames and decode per frame (cost x STEP)
 )
 
 
@@ -49,7 +50,7 @@ def predict_logp(models, feats):
 
 
 def decode_seq(atd, model_paths, cfg=SEQ):
-    from train_seq import viterbi_logp
+    from train_seq import viterbi_logp, frame_logp
     models = _load(model_paths)
     out = np.full(atd.n_frames, "X", dtype="<U1")
     net, setp = rule.tag_evidence(atd.n_frames, rule.PARAMS)
@@ -64,7 +65,11 @@ def decode_seq(atd, model_paths, cfg=SEQ):
         logp[:, 0] += cfg["tag_team"] * pad(net[sl]) * 0.5
         logp[:, 1] -= cfg["tag_team"] * pad(net[sl]) * 0.5
         logp[:, 2] += cfg["tag_setpiece"] * pad(setp[sl])
-        path = viterbi_logp(logp, cfg["switch_cost"])
-        out[sl] = rule.LETTERS[np.repeat(path, STEP)[:last - first + 1]]
+        n = last - first + 1
+        if cfg["frame_decode"]:
+            path = viterbi_logp(frame_logp(logp, n, STEP), cfg["switch_cost"] * STEP)
+        else:
+            path = np.repeat(viterbi_logp(logp, cfg["switch_cost"]), STEP)[:n]
+        out[sl] = rule.LETTERS[path]
     out[110808:113742] = "D"  # FAQ.md: graded but the ball is dead until the 113,742 kickoff
     return out

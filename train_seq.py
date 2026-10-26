@@ -58,12 +58,26 @@ def swap_np(x, columns):
 
 
 def load(path):
+    """[(X, step_labels, frame_labels or None)], plus per-series match, half, rep and columns."""
     z = np.load(path, allow_pickle=True)
-    lens = z["lens"]
+    X, Y, lens = z["X"], z["Y"], z["lens"]  # read each array once: npz access decompresses
     ends = np.cumsum(lens)
     starts = ends - lens
-    series = [(z["X"][s:e], z["Y"][s:e]) for s, e in zip(starts, ends)]
+    if "YF" in z.files:
+        YF, fl = z["YF"], z["flens"]
+        fe = np.cumsum(fl)
+        frames = [YF[s:e] for s, e in zip(fe - fl, fe)]
+    else:
+        frames = [None] * len(lens)
+    series = [(X[s:e], Y[s:e], f) for (s, e), f in zip(zip(starts, ends), frames)]
     return series, z["match"], z["half"], z["rep"], list(z["columns"])
+
+
+def frame_logp(logp, n_frames, step=10):
+    """Step log-probs linearly interpolated to frames (step i is centred on frame i*step + step/2)."""
+    centres = np.arange(len(logp)) * step + (step - 1) / 2.0
+    f = np.arange(n_frames)
+    return np.stack([np.interp(f, centres, logp[:, k]) for k in range(logp.shape[1])], axis=1)
 
 
 def viterbi_logp(logp, cost):
@@ -85,29 +99,39 @@ def viterbi_logp(logp, cost):
 
 
 def evaluate(model, series, idx, mu, sd, device, step=10, switch_cost=2.0):
-    """Mean step accuracy and spellF1 over the held-out series (frame-level, both halves)."""
+    """Held-out scores against FRAME-level labels.
+
+    spellF1 / macroF1: step decisions repeated to frames.  spellF1_fr / macroF1_fr: step log-probs
+    interpolated to frames and decoded per frame (cost x step, the same stiffness), which places
+    boundaries between step edges.
+    """
     model.eval()
-    accs, gts, preds = [], [], []
+    accs, rows = [], []
     with torch.no_grad():
         for i in idx:
-            x, y = series[i]
+            x, y, yf = series[i]
             xt = torch.from_numpy(((x - mu) / sd)[None]).float().to(device)
             logp = torch.log_softmax(model(xt)[0], -1).cpu().numpy()
             path = viterbi_logp(logp, switch_cost)
             ok = y >= 0
             accs.append(float((path[ok] == y[ok]).mean()))
-            gts.append(np.repeat(np.where(y >= 0, y, 3), step))
-            preds.append(np.repeat(path, step))
+            if yf is None:  # older datasets: step labels only
+                yf = np.repeat(y, step)
+            n = len(yf)
+            gt = np.where(yf >= 0, yf, 3).astype(np.int8)
+            rows.append((gt, np.repeat(path, step)[:n].astype(np.int8),
+                         viterbi_logp(frame_logp(logp, n, step), switch_cost * step).astype(np.int8)))
     out = {"acc": float(np.mean(accs))}
-    if pm is not None and gts:
-        spell, macro = [], []
-        for g, p in zip(gts, preds):
-            runs = pm.valid_runs(g.astype(np.int8))
-            spell.append(pm.spell_scores(g.astype(np.int8), p.astype(np.int8), runs)["mean_f1"])
-            cm3 = pm.scored_confusion(pm.confusion(g.astype(np.int8), p.astype(np.int8)))
-            macro.append(pm.macro_f1(cm3))
-        out["spellF1"] = float(np.mean(spell))
-        out["macroF1"] = float(np.mean(macro))
+    if pm is not None and rows:
+        for key, j in (("", 1), ("_fr", 2)):
+            spell, macro = [], []
+            for r in rows:
+                g, p = r[0], r[j]
+                runs = pm.valid_runs(g)
+                spell.append(pm.spell_scores(g, p, runs)["mean_f1"])
+                macro.append(pm.macro_f1(pm.scored_confusion(pm.confusion(g, p))))
+            out["spellF1" + key] = float(np.mean(spell))
+            out["macroF1" + key] = float(np.mean(macro))
     return out
 
 
@@ -115,6 +139,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--features", default=os.path.join(ROOT, "external", "train", "features.npz"))
     ap.add_argument("--val", type=int, nargs="+", default=[0, 1], help="match indices held out; -1 = none")
+    ap.add_argument("--exclude", type=int, nargs="*", default=[], help="match indices never used")
     ap.add_argument("--out", default=os.path.join(ROOT, "models", "seq.pt"))
     ap.add_argument("--iters", type=int, default=3000)
     ap.add_argument("--batch", type=int, default=32)
@@ -130,7 +155,8 @@ def main():
     rng = np.random.default_rng(args.seed)
     series, match, half, rep, columns = load(args.features)
     val_matches = set(v for v in args.val if v >= 0)
-    train_idx = [i for i in range(len(series)) if match[i] not in val_matches]
+    excluded = set(args.exclude)
+    train_idx = [i for i in range(len(series)) if match[i] not in val_matches | excluded]
     val_idx = [i for i in range(len(series)) if match[i] in val_matches and rep[i] == 0]
     print("series: train {} val {} | features {} | device {}".format(
         len(train_idx), len(val_idx), len(columns), args.device), flush=True)
@@ -147,7 +173,7 @@ def main():
         model.train()
         xb, yb = [], []
         for _ in range(args.batch):
-            x, y = series[train_idx[rng.integers(len(train_idx))]]
+            x, y, _ = series[train_idx[rng.integers(len(train_idx))]]
             s = int(rng.integers(0, max(1, len(x) - args.chunk)))
             xc, yc = x[s:s + args.chunk].copy(), y[s:s + args.chunk].astype(np.int64).copy()
             if len(xc) < args.chunk:

@@ -14,10 +14,12 @@ os.chdir(work)
 os.makedirs("models", exist_ok=True)
 
 BASE = ["--hidden", "64", "--layers", "2", "--chunk", "400", "--iters", "4000"]
+DATA = ["--features", "features_v4.npz", "--exclude", "7", "8"]  # 7, 8 = Metrica (dropped)
 RUNS = {
-    "ctx": ["--features", "features_ctx.npz"] + BASE,
-    "ctxorient": ["--features", "features_ctx_orient.npz"] + BASE,
+    "dfl": DATA + BASE,
+    "dfl8k": DATA + BASE[:-1] + ["8000"],
 }
+FINAL = {"dfl": (0, 1, 2, 3, 4)}
 
 with open("results.txt", "w") as log:
     def run(name, extra):
@@ -33,7 +35,7 @@ with open("results.txt", "w") as log:
     for name, cfg in RUNS.items():
         for fold in range(7):
             run(name, cfg + ["--val", str(fold), "--out", "models/{}_val{}.pt".format(name, fold)])
-        for seed in (0, 1, 2):
+        for seed in FINAL.get(name, ()):
             run(name, cfg + ["--val", "-1", "--seed", str(seed),
                              "--out", "models/{}_all_s{}.pt".format(name, seed)])
 for f in glob.glob("models/*_val*.pt"):
