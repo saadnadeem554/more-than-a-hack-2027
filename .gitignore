@@ -68,3 +68,4 @@ models/*.pt
 !models/seq_*.pt
 kaggle/out/
 kaggle/ds/*.npz
+kaggle/prev/
