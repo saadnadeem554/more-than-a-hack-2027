@@ -1,0 +1,13 @@
+{
+  "id": "sadbhoi/mtah-leti-gang-train",
+  "title": "mtah-leti-gang-train",
+  "code_file": "run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": false,
+  "dataset_sources": ["sadbhoi/mtah-leti-gang-train-features"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

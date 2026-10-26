@@ -1,0 +1,6 @@
+{
+  "title": "mtah-leti-gang-train-features",
+  "id": "sadbhoi/mtah-leti-gang-train-features",
+  "licenses": [{"name": "CC-BY-SA-4.0"}],
+  "description": "Step features and labels derived from the DFL/Sportec open dataset (Bassek, Rein, Weber & Memmert 2025, Scientific Data, CC BY 4.0, doi 10.6084/m9.figshare.28196177), degraded to mimic automatic tracking. Contains no competition data."
+}

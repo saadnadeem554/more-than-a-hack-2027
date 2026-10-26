@@ -1,0 +1,5 @@
+# Leti Gang submission pipeline (python 3.10). Install torch from the CPU index:
+#   pip install -r requirements-leti.txt --extra-index-url https://download.pytorch.org/whl/cpu
+numpy==2.2.6
+pandas==2.3.3
+torch==2.14.1
