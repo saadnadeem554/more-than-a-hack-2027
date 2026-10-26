@@ -46,13 +46,14 @@ class SeqNet(nn.Module):
 
 
 def swap_np(x, columns):
-    """Team-swap augmentation without importing src/ (uses the stored column names)."""
+    """Team-swap augmentation without importing src/: exchange h_/a_ blocks, negate *_s columns."""
     cols = list(columns)
     home = [i for i, c in enumerate(cols) if c.startswith("h_")]
     away = [cols.index("a_" + cols[i][2:]) for i in home]
     y = x.copy()
     y[..., home], y[..., away] = x[..., away], x[..., home]
-    y[..., cols.index("ctrl")] = -x[..., cols.index("ctrl")]
+    signed = [i for i, c in enumerate(cols) if c.endswith("_s")]
+    y[..., signed] = -y[..., signed]
     return y
 
 

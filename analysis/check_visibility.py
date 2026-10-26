@@ -1,19 +1,17 @@
-"""Mean ball visibility of degraded external tracking for a few visible-run scales (target ~0.593)."""
+"""Mean ball visibility of degraded external tracking (target ~0.593 on the competition)."""
 import os, sys
 import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from src import external_sportec as ext
-from src import degrade as dg
+from src.degrade import degrade
 
-for scale in (1.0, 1.5, 2.0, 2.5):
+for context in (False, True):
     rng = np.random.default_rng(0)
     vals = []
     for mid in ext.match_ids()[:3]:
-        parts, _ = ext.load_match(mid)
+        parts, pitch = ext.load_match(mid)
         for p in parts:
-            n = len(p["bx"])
-            mask = dg.synthetic_pattern(n, rng, scale)
-            out = (p["bx"] < 0) | (p["bx"] > 1) | (p["by"] < 0) | (p["by"] > 1)
-            vals.append((mask & ~out).mean())
-    print("visible_scale {:.1f}: mean visible {:.3f}  (out-of-pitch share {:.3f})".format(scale, np.mean(vals), out.mean()))
+            _, _, bx, _ = degrade(p["px"], p["py"], p["bx"], p["by"], rng, pitch=pitch, context=context)
+            vals.append(np.isfinite(bx).mean())
+    print("context={}: mean visible {:.3f} (range {:.3f}-{:.3f})".format(context, np.mean(vals), min(vals), max(vals)))

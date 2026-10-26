@@ -34,7 +34,7 @@ def _load(paths):
         m = SeqNet(len(ck["columns"]), ck["hidden"], ck.get("layers", 2))
         m.load_state_dict(ck["state"])
         m.eval()
-        models.append((m, ck["mu"], ck["sd"]))
+        models.append((m, ck["mu"], ck["sd"], list(ck["columns"])))
     return models
 
 
@@ -42,7 +42,7 @@ def predict_logp(models, feats):
     import torch
     out = 0.0
     with torch.no_grad():
-        for m, mu, sd in models:
+        for m, mu, sd, _ in models:
             x = torch.from_numpy(((feats - mu) / sd)[None]).float()
             out = out + torch.log_softmax(m(x)[0], -1).numpy()
     return out / len(models)
@@ -56,7 +56,7 @@ def decode_seq(atd, model_paths, cfg=SEQ):
     for half, first, last in half_video_blocks("BAR-ATH"):
         sl = slice(first, last + 1)
         feats = compute_features(atd.px[sl], atd.py[sl], atd.bx[sl], atd.by[sl], atd.team,
-                                 pitch=atd.pitch)
+                                 pitch=atd.pitch, orient="ball_x_s" in models[0][3])
         logp = predict_logp(models, feats)
         n_steps = len(logp)
         pad = lambda a: np.pad(a, (0, n_steps * STEP - len(a)), mode="edge").reshape(n_steps, STEP).mean(1)

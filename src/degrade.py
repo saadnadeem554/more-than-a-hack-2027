@@ -34,7 +34,36 @@ def synthetic_pattern(n, rng, visible_scale=1.0):
     return out
 
 
-def degrade(px, py, bx, by, rng, pitch=(105.0, 68.0), randomise=True):
+# Relative ball-loss hazard of the competition tracker by context (analysis/gap_context.py):
+# losses are ~2x more likely when the ball is slow (often dead) and ~2x more likely in a crowd.
+SPEED_BINS, SPEED_MULT = [3, 8, 15, 25], [1.97, 0.84, 0.43, 0.24, 0.8]
+CROWD_BINS, CROWD_MULT = [3, 5], [1.0, 1.45, 2.3]
+
+
+def context_pattern(bx, by, px, py, rng, pitch, base_hazard):
+    """Ball visibility where each visible frame is lost with a context-dependent hazard and each
+    gap lasts a length sampled from the competition run-length quantiles."""
+    n = len(bx)
+    L, W = pitch
+    v = np.zeros(n)
+    v[1:] = np.hypot(np.diff(bx) * L, np.diff(by) * W) * 25
+    v = np.nan_to_num(v)
+    d = np.hypot((px - bx[:, None]) * L, (py - by[:, None]) * W)
+    crowd = (np.where(np.isfinite(d), d, np.inf) < 5).sum(1)
+    h = base_hazard * np.array(SPEED_MULT)[np.digitize(v, SPEED_BINS)]         * np.array(CROWD_MULT)[np.digitize(crowd, CROWD_BINS)]
+    starts = np.flatnonzero(rng.random(n) < h)
+    out = np.ones(n, dtype=bool)
+    free = 0
+    for t in starts:
+        if t < free:
+            continue
+        length = int(np.interp(rng.random() * 100, MISSING_Q[0], MISSING_Q[1]))
+        out[t:t + length] = False
+        free = t + length + 1
+    return out
+
+
+def degrade(px, py, bx, by, rng, pitch=(105.0, 68.0), randomise=True, context=True):
     n = len(bx)
     L, W = pitch
     u = (lambda lo, hi: rng.uniform(lo, hi)) if randomise else (lambda lo, hi: (lo + hi) / 2)
@@ -46,7 +75,10 @@ def degrade(px, py, bx, by, rng, pitch=(105.0, 68.0), randomise=True):
     # ball: sampled gaps, plus hidden when outside the pitch rectangle
     # Visible runs are stretched because hiding the off-pitch ball (about a third of external
     # frames) adds gaps of its own; 2-3x lands the overall visibility near the competition's 59%.
-    mask = synthetic_pattern(n, rng, visible_scale=u(2.0, 3.0))
+    if context:
+        mask = context_pattern(bx, by, px, py, rng, pitch, base_hazard=u(0.0003, 0.0007))
+    else:
+        mask = synthetic_pattern(n, rng, visible_scale=u(2.0, 3.0))
     outside = (bx < 0) | (bx > 1) | (by < 0) | (by > 1)
     hide_out = outside & (np.repeat(rng.random(-(-n // 25)), 25)[:n] < out_hide)
     mask &= ~hide_out

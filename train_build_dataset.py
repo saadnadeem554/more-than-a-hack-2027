@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 from src import external_sportec as ext  # noqa: E402
 from src.degrade import degrade, degraded_team  # noqa: E402
-from src.features import compute_features, step_labels, N_FEATURES, COLUMNS  # noqa: E402
+from src.features import compute_features, step_labels, columns  # noqa: E402
 
 
 def main():
@@ -22,6 +22,8 @@ def main():
     ap.add_argument("--reps", type=int, default=6)
     ap.add_argument("--out", default=os.path.join(ROOT, "external", "train", "features.npz"))
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--no-orient", action="store_true", help="omit the direction-aware features")
+    ap.add_argument("--random-gaps", action="store_true", help="context-free ball gaps (older degradation)")
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
 
@@ -31,16 +33,18 @@ def main():
         for part in parts:
             y = step_labels(part["label"])
             for rep in range(args.reps):
-                px, py, bx, by = degrade(part["px"], part["py"], part["bx"], part["by"], rng, pitch=pitch)
-                X.append(compute_features(px, py, bx, by, degraded_team(part["team"]), pitch=pitch))
+                px, py, bx, by = degrade(part["px"], part["py"], part["bx"], part["by"], rng, pitch=pitch,
+                                         context=not args.random_gaps)
+                X.append(compute_features(px, py, bx, by, degraded_team(part["team"]), pitch=pitch,
+                                          orient=not args.no_orient))
                 Y.append(y); M.append(mi); H.append(int(part["half"][0])); R.append(rep)
             print(mid, "half", part["half"][0], "done", flush=True)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     lens = np.array([len(x) for x in X])
     np.savez_compressed(args.out, X=np.concatenate(X), Y=np.concatenate(Y), lens=lens,
                         match=np.array(M), half=np.array(H), rep=np.array(R),
-                        columns=np.array(COLUMNS))
-    print("saved", args.out, "rows", int(lens.sum()), "features", N_FEATURES)
+                        columns=np.array(columns(not args.no_orient)))
+    print("saved", args.out, "rows", int(lens.sum()), "features", len(columns(not args.no_orient)))
 
 
 if __name__ == "__main__":
