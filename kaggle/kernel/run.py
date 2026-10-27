@@ -19,8 +19,10 @@ V6T = ["--features", "features_v6t_lab.npz"]  # same degradation + touch feature
 RUNS = {
     "base": V6 + BASE,
     "touch": V6T + BASE,
+    "tcn": V6T + ["--arch", "tcn", "--hidden", "64", "--layers", "6", "--chunk", "400",
+                  "--iters", "4000"],
 }
-FINAL = {"base": (0, 1, 2, 3, 4), "touch": (0, 1, 2, 3, 4)}
+FINAL = {"tcn": (0, 1, 2, 3, 4)}  # base/touch full-data seeds already exist (training is deterministic)
 DUMP = True
 
 with open("results.txt", "w") as log:

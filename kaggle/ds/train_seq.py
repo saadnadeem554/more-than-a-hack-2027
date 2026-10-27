@@ -45,6 +45,32 @@ class SeqNet(nn.Module):
         return self.out(h)
 
 
+class TCN(nn.Module):
+    """Non-causal dilated temporal convolutions (dilations 1..32, kernel 3, residual):
+    a structurally different sequence model for ensemble diversity (~+/-50 s receptive field)."""
+
+    def __init__(self, n_in, hidden=64, layers=6, dropout=0.2):
+        super().__init__()
+        self.inp = nn.Conv1d(n_in, hidden, 1)
+        self.blocks = nn.ModuleList()
+        for i in range(layers):
+            d = 2 ** i
+            self.blocks.append(nn.Sequential(
+                nn.Conv1d(hidden, hidden, 3, padding=d, dilation=d), nn.ReLU(), nn.Dropout(dropout),
+                nn.Conv1d(hidden, hidden, 3, padding=d, dilation=d), nn.ReLU()))
+        self.out = nn.Conv1d(hidden, 3, 1)
+
+    def forward(self, x):
+        h = self.inp(x.transpose(1, 2))
+        for b in self.blocks:
+            h = h + b(h)
+        return self.out(h).transpose(1, 2)
+
+
+def build_model(arch, n_in, hidden, layers):
+    return TCN(n_in, hidden, layers) if arch == "tcn" else SeqNet(n_in, hidden, layers)
+
+
 def swap_np(x, columns):
     """Team-swap augmentation without importing src/: exchange h_/a_ blocks, negate *_s columns."""
     cols = list(columns)
@@ -167,6 +193,7 @@ def main():
     ap.add_argument("--chunk", type=int, default=400, help="steps per training chunk (0.4 s each)")
     ap.add_argument("--hidden", type=int, default=64)
     ap.add_argument("--layers", type=int, default=2)
+    ap.add_argument("--arch", default="gru", choices=["gru", "tcn"])
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--seed", type=int, default=0)
@@ -184,7 +211,7 @@ def main():
 
     allx = np.concatenate([series[i][0] for i in train_idx])
     mu, sd = allx.mean(0), allx.std(0) + 1e-6
-    model = SeqNet(len(columns), args.hidden, args.layers).to(args.device)
+    model = build_model(args.arch, len(columns), args.hidden, args.layers).to(args.device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.iters)
     loss_fn = nn.CrossEntropyLoss(ignore_index=-1, reduction="none")
@@ -235,6 +262,9 @@ def main():
                 x, y, yf = series[i]
                 xt = torch.from_numpy(((x - mu) / sd)[None]).float().to(args.device)
                 dump["logp_%d" % i] = torch.log_softmax(model(xt)[0], -1).cpu().numpy()
+                # team-swap test-time augmentation: predict on swapped teams, swap H/A back
+                xs = torch.from_numpy(((swap_np(x, columns) - mu) / sd)[None]).float().to(args.device)
+                dump["logpS_%d" % i] = torch.log_softmax(model(xs)[0], -1).cpu().numpy()[:, [1, 0, 2]]
                 dump["yf_%d" % i] = yf if yf is not None else np.repeat(y, 10)
                 dump["x_%d" % i] = x
         np.savez_compressed(args.dump, columns=np.array(columns), **dump)
@@ -247,7 +277,7 @@ def main():
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     torch.save({"state": model.state_dict(), "mu": mu, "sd": sd, "columns": columns,
-                "hidden": args.hidden, "layers": args.layers,
+                "hidden": args.hidden, "layers": args.layers, "arch": args.arch,
                 "val": sorted(val_matches)}, args.out)
     print("saved", args.out)
 

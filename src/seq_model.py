@@ -22,30 +22,38 @@ SEQ = dict(
     tag_team=0.0,        # weight of Smart Tagging team votes (nats)
     tag_setpiece=0.0,    # nats of extra D inside the first seconds of a set-piece window
     frame_decode=False,  # interpolate step log-probs to frames and decode per frame (cost x STEP)
+    tta=False,           # team-swap test-time augmentation
 )
 
 
 def _load(paths):
     import torch
     sys.path.insert(0, ROOT)
-    from train_seq import SeqNet
+    from train_seq import build_model
     models = []
     for p in paths:
         ck = torch.load(p, map_location="cpu", weights_only=False)
-        m = SeqNet(len(ck["columns"]), ck["hidden"], ck.get("layers", 2))
+        m = build_model(ck.get("arch", "gru"), len(ck["columns"]), ck["hidden"], ck.get("layers", 2))
         m.load_state_dict(ck["state"])
         m.eval()
         models.append((m, ck["mu"], ck["sd"], list(ck["columns"])))
     return models
 
 
-def predict_logp(models, feats):
+def predict_logp(models, feats, tta=False):
+    """Mean step log-probs over models; with tta, each model also sees the team-swapped input
+    and its H/A outputs are swapped back (makes the ensemble exactly home/away symmetric)."""
     import torch
+    from train_seq import swap_np
     out = 0.0
     with torch.no_grad():
-        for m, mu, sd, _ in models:
+        for m, mu, sd, cols in models:
             x = torch.from_numpy(((feats - mu) / sd)[None]).float()
-            out = out + torch.log_softmax(m(x)[0], -1).numpy()
+            lp = torch.log_softmax(m(x)[0], -1).numpy()
+            if tta:
+                xs = torch.from_numpy(((swap_np(feats, cols) - mu) / sd)[None]).float()
+                lp = 0.5 * (lp + torch.log_softmax(m(xs)[0], -1).numpy()[:, [1, 0, 2]])
+            out = out + lp
     return out / len(models)
 
 
@@ -66,7 +74,7 @@ def decode_seq(atd, model_paths, cfg=SEQ):
                                      pitch=atd.pitch, orient="ball_x_s" in cols,
                                      touch="ball_acc" in cols)
             assert list(cols) == columns("ball_x_s" in cols, "ball_acc" in cols)
-            logp = logp + predict_logp(group, feats) * len(group)
+            logp = logp + predict_logp(group, feats, cfg["tta"]) * len(group)
         logp = logp / len(models)
         n_steps = len(logp)
         pad = lambda a: np.pad(a, (0, n_steps * STEP - len(a)), mode="edge").reshape(n_steps, STEP).mean(1)

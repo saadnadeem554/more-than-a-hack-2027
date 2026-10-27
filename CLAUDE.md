@@ -40,7 +40,7 @@ figshare API, article 28196177), then `python train_build_dataset.py --reps 8 --
 | `src/degrade.py` | makes clean external tracking look like the competition ATD |
 | `src/external_sportec.py` | DFL/Sportec open-data parser; labels from `BallStatus`/`BallPossession` |
 | `train_build_dataset.py`, `train_seq.py` | dataset build; BiGRU training + held-out evaluation |
-| `src/seq_model.py`, `make_submission.py` | inference: 3-seed ensemble -> Viterbi -> labels |
+| `src/seq_model.py`, `make_submission.py` | inference: model ensemble (per-model feature sets) -> Viterbi -> labels |
 | `src/decoder.py` | v1 hand-built evidence + Viterbi decoder (fallback, `--rule`) |
 | `kaggle/` | Kaggle dataset metadata + GPU kernel (`run.py`) |
 | `analysis/` | aggregate-only exploration, domain-gap checks, external benchmarks, sweep summary |
@@ -109,3 +109,55 @@ balls. Minimum structure comes from the Viterbi switching cost, not hand rules.
 | train on 2 s / 4 s merge (scored on 3 s) | +0.002 / −0.024 paired | — | — |
 | 3 s model scored on 2 s / 4 s labels (robustness) | 0.660 / 0.708 | — | — |
 | **ensemble base + touch (10 models), cost 2.0 (current)** | **0.709** (better than base on 6/7; flat 0.709–0.712 over costs 2–4) | 0.566 [0.36, 0.77], 12 poss | 243 poss, 15.2 s, 3.96 / live-min, 42% D |
+
+## Error analysis (held-out external folds, `analysis/oracle_errors.py`)
+
+| scenario | spellF1 |
+|---|---|
+| model as shipped | 0.634 |
+| oracle dead/alive (true D, model's team) | 0.632 — dead-ball detection is **not** the bottleneck |
+| oracle team while alive | 0.946 — nearly all loss is possession changes in live play |
+
+True possessions by length, matched at IoU 0.5: <2 s 22% (919 of 3061!), 2–5 s 54%, 5–10 s 73%,
+10–20 s 88%, ≥20 s 96%. The model predicted 2249 possessions vs 3061 true.
+
+**Label-definition mismatch** (`analysis/possession_density.py`): DFL `BallPossession` switches on
+every touch — 8.3 possessions per minute of live play, 30% shorter than 2 s, median 3.7 s. The
+public competition GT (the organisers' reference for how cases are labelled): 4.2 / alive-min, 12%
+under 2 s, median 7.6 s. The competition counts only *controlled* possession (touches, deflections,
+uncontrolled aerial duels do not change it). `src/labels.merge_sandwiched` relabels a short spell
+of one team that sits between spells of the other team: merging <3 s gives 5.3 / min, 15% <2 s,
+median 6.8 s. 3 s chosen from the definition's wording ("keeps the ball for a few seconds"), not
+fitted; the agreement with the public statistics is corroboration (17 possessions is too few to fit).
+
+## Tried and dropped / lessons
+
+- Hand-built decoder looked best on the public window (0.47) but was *below* the starter baseline
+  on labelled external matches — the public window cannot rank (as EVALUATION.md warns).
+- ATD ball speed field is unusable (9% filled, uncorrelated with displacement) — speed is computed
+  from positions instead.
+- Bigger/longer/deeper GRUs (hidden 128, chunk 1000, 3 layers): no gain beyond noise.
+- Smart Tagging: not used by the model (external matches have none, so its weight cannot be tuned
+  honestly). Set-piece windows are 35 s / 5 s fixed and only approximately locate restarts; throw-ins
+  have Team `N/A`.
+- Metrica open sample games 1-2 as extra training data (labels derived from events: dead from
+  BALL OUT / FAULT RECEIVED / goal to the next restart; possession = team of last PASS / SET PIECE /
+  SHOT / RECOVERY / BALL LOST, unchanged by CHALLENGE). Paired 7-fold test on held-out DFL:
+  0.649 with vs 0.653 without (mixed per match, -0.064..+0.023) -> dropped. Likely causes: event-
+  derived labels differ from tracking-derived ones, and the sample tracking blanks the ball almost
+  exactly when dead (visible on 0-17% of dead frames vs 66% in the public window), a shortcut that
+  does not hold for the competition tracker. Code kept: `src/external_metrica.py`, `--metrica`.
+- Transition-weighted loss (×3 within 2 s of a possession change): worse (−0.008 paired).
+- Semi-Markov (explicit-duration) decoding with duration distributions learned from the other
+  six matches (`src/hsmm.py`, `analysis/hsmm_eval.py`): best of 18 settings +0.004 over the flat
+  Viterbi (5/7), most settings worse — decoding is not the bottleneck; not adopted.
+- Public-window bootstrap intervals are ±0.2 — variants differing by 2 possessions there are
+  indistinguishable (`analysis/compare_variants.py`).
+- Broadcast video/tracking: not used (unsynchronised; tactical tracking is complete).
+
+## Limitations / future work
+
+- Transfer gap: degradation is simulated; identity switches, false ball detections and camera
+  artefacts of the real tracker are only partly modelled.
+- Possession definition of DFL labels vs organiser ground truth may differ on contested balls.
+- Only 7 external matches; held-out spellF1 varies 0.58–0.71 by match.
