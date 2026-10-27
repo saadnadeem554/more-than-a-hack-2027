@@ -22,7 +22,7 @@ SEQ = dict(
     tag_team=0.0,        # weight of Smart Tagging team votes (nats)
     tag_setpiece=0.0,    # nats of extra D inside the first seconds of a set-piece window
     frame_decode=False,  # interpolate step log-probs to frames and decode per frame (cost x STEP)
-    tta=False,           # team-swap test-time augmentation
+    tta=True,            # team-swap test-time augmentation (+0.012 held-out, 6-7/7 folds)
 )
 
 

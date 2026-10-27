@@ -76,9 +76,11 @@ exchanges team blocks and negates signed `*_s` columns, so "home" carries no pri
 
 **Model + decoding.** 2-layer BiGRU (hidden 64) on 400-step chunks, 4000 iters, AdamW + OneCycle;
 trained on DFL labels with short sandwiched touches (<3 s) merged (`src/labels.py`, see error
-analysis). Ensemble of 10 models trained on all 7 matches: 5 seeds on the base features + 5 seeds
-with touch features (ball velocity change, control at touches, ball x-velocity along the attack,
-per-team approach speed); log-probs averaged; Viterbi with switching cost 2.0 nats (held-out CV
+analysis). Ensemble of 15 models trained on all 7 matches: 5 BiGRU seeds on the base features, 5 BiGRU
+seeds with touch features (ball velocity change, control at touches, ball x-velocity along the
+attack, per-team approach speed), and 5 seeds of a dilated temporal CNN (6 residual blocks,
+dilations 1–32, ~±50 s context) on the touch features. Each model also runs on the home/away-swapped
+input with its H/A outputs swapped back (test-time augmentation); log-probs averaged; Viterbi with switching cost 2.0 nats (held-out CV
 flat over 2–4; 2 gives the possession density closest to the public reference, 4.0 vs 4.2 per
 live minute). Frames 110,808–113,741 forced `D` (FAQ: graded, before 2nd-half kickoff).
 Ungraded frames `X`.
@@ -108,7 +110,10 @@ balls. Minimum structure comes from the Viterbi switching cost, not hand rules.
 | + touch features | +0.012 paired (4/7, not significant) | 0.430, 10 poss | 3.79 / live-min |
 | train on 2 s / 4 s merge (scored on 3 s) | +0.002 / −0.024 paired | — | — |
 | 3 s model scored on 2 s / 4 s labels (robustness) | 0.660 / 0.708 | — | — |
-| **ensemble base + touch (10 models), cost 2.0 (current)** | **0.709** (better than base on 6/7; flat 0.709–0.712 over costs 2–4) | 0.566 [0.36, 0.77], 12 poss | 243 poss, 15.2 s, 3.96 / live-min, 42% D |
+| ensemble base + touch (10 models), cost 2.0 | 0.709 (better than base on 6/7; flat 0.709–0.712 over costs 2–4) | 0.566 [0.36, 0.77], 12 poss | 243 poss, 15.2 s, 3.96 / live-min, 42% D |
+| semi-Markov decoding (best of 18) | +0.004 — not adopted | — | — |
+| + team-swap TTA | 0.721 @cost 2 | — | — |
+| **+ TCN models (15 models: 5 GRU base, 5 GRU touch, 5 TCN touch), TTA, cost 2.0 (current)** | **0.724** (vs shipped 0.709: better on 7/7, +0.003..+0.035) | 0.566 [CI ±0.2], 12 poss | 249 poss, 14.9 s, 4.03 / live-min, 42% D |
 
 ## Error analysis (held-out external folds, `analysis/oracle_errors.py`)
 
